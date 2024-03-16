@@ -18,3 +18,5 @@ The 'Well_Estimates_2020.csv' dataset represents the final estimates of well use
 | Est_Wells_2020 | Estimated count of housing units using private water supply sources within the census block in 2020.                                                |
 
 ![Visualization of decision tree showing how census blocks are classified into twenty typologies, represented by letters 'A' through 'T'](images/DT.png)
+
+Figure: Visualization of decision tree showing how census blocks are classified into twenty typologies, represented by letters 'A' through 'T'
