@@ -13,11 +13,16 @@ This data can also be viewed in the public [2020 Domestic Well Application](http
 
 For additional questions about this research, contact:
 
-Dr. Andrew Murray 
-Geographer 
+Dr. Andrew Murray
+
+Geographer
+
 United States Environmental Protection Agency 
+
 Office of Research and Development 
+
 Cincinnati, OH 
+
 [Murray.AndrewR@epa.gov](mailto:murray.andrewr@epa.gov)
 
 
