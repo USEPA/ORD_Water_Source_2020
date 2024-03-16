@@ -1,21 +1,32 @@
-# EPA Open Source Reference
+# Estimates of Domestic Water Sources in the United States (2020)
 
-## Brief Project Description
+## Project Description
 
-This repository contains files for teams to reuse when working in and with EPA Open Source projects.
+EPA estimates that roughly 16% of housing units in the United States
+self-supply water for domestic household use while the majority of housing units (84%) obtain their water from one of the over 45,000 community water systems (public water system). While community water systems are subject to federal testing regulations, the responsibility of testing private water sources such as domestic wells lies principally with the homeowner. The code and documentation within this repository details the process for the 2020 estimates of housing units that self-supply water in the United States at the census block group level. Estimates are available at the census block geography for the fifty U.S. states plus the district of Columbia. Estimates for Puerto Rico and outlying territories are not available at this time. For more detailed information, please refer to the user guide 'Wells_2020_User.pdf'. The final dataset is available for download as a comma delimited text file and can be found in the 'outputs/' folder.
 
-Also, this repository contains the link to [EPA's System Lifecycle Management Policy and Procedure](https://www.epa.gov/irmpoli8/policy-procedures-and-guidance-system-life-cycle-management-slcm) which lays out EPA's Open Source Software Policy and [EPA's Open Source Code Guidance](https://www.epa.gov/developers/open-source-software-and-epa-code-repository-requirements). 
+For more information about domestic wells, visit the [EPA Website](https://www.epa.gov/privatewells)
 
-## For EPA Teams
+This data can also be viewed in the public [2020 Domestic Well Application](https://experience.arcgis.com/experience/be9006c30a2148f595693066441fb8eb)
 
-For EPA Teams, we have guidance on how EPA puts our open source software policies into practice on GitHub. Read [EPA's GitHub Guidance.](https://www.epa.gov/webguide/github-guidance)
+## Contact
 
-[EPA's Open Source Project repo](https://github.com/USEPA/open-source-projects) is for EPA teams to reuse file for properly maintaining their open source project. All projects must include a readme.md, license.md, contributing.md file and the disclaimer below.   
+For additional questions about this research, contact:
+
+Dr. Andrew Murray
+Geographer
+United States Environmental Protection Agency
+Office of Resaerch and Development
+Cincinnati, OH
+[Murray.AndrewR@epa.gov](mailto:murray.andrewr@epa.gov)
+
 
 ### Credits
 
 This repository reused material from [GSA](https://www.gsa.gov/), [18F](https://18f.gsa.gov/) , [Lawrence Livermore National Lab](https://www.llnl.gov/), and from the [Consumer Financial Protection Bureau's policy](https://github.com/cfpb/source-code-policy).
 
-### Disclaimer
+### Disclaimers
 
-The United States Environmental Protection Agency (EPA) GitHub project code is provided on an "as is" basis and the user assumes responsibility for its use.  EPA has relinquished control of the information and no longer has responsibility to protect the integrity , confidentiality, or availability of the information.  Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by EPA.  The EPA seal and logo shall not be used in any manner to imply endorsement of any commercial product or activity by EPA or the United States Government.
+The United States Environmental Protection Agency (EPA) GitHub project code is provided on an "as is" basis and the user assumes responsibility for its use. EPA has relinquished control of the information and no longer has responsibility to protect the integrity , confidentiality, or availability of the information. Any reference to specific commercial products, processes, or services by service mark, trademark, manufacturer, or otherwise, does not constitute or imply their endorsement, recommendation or favoring by EPA. The EPA seal and logo shall not be used in any manner to imply endorsement of any commercial product or activity by EPA or the United States Government.
+
+This data and the code used to produce it has been reviewed in accordance with U.S. Environmental Protection Agency, Office of Research and Development, and approved for publication.
