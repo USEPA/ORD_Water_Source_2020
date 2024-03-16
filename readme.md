@@ -2,8 +2,7 @@
 
 ## Project Description
 
-EPA estimates that roughly 16% of housing units in the United States
-self-supply water for domestic household use while the majority of housing units (84%) obtain their water from one of the over 45,000 community water systems (public water system). While community water systems are subject to federal testing regulations, the responsibility of testing private water sources such as domestic wells lies principally with the homeowner. The code and documentation within this repository details the process for the 2020 estimates of housing units that self-supply water in the United States at the census block group level. Estimates are available at the census block geography for the fifty U.S. states plus the district of Columbia. Estimates for Puerto Rico and outlying territories are not available at this time. For more detailed information, please refer to the user guide 'Wells_2020_User.pdf'. The final dataset is available for download as a comma delimited text file and can be found in the 'outputs/' folder.
+EPA estimates that roughly 16% of housing units in the United States self-supply water for domestic household use while the majority of housing units (84%) obtain their water from one of the over 45,000 community water systems (public water system). While community water systems are subject to federal testing regulations, the responsibility of testing private water sources such as domestic wells lies principally with the homeowner. The code and documentation within this repository details the process for the 2020 estimates of housing units that self-supply water in the United States at the census block group level. Estimates are available at the census block geography for the fifty U.S. states plus the district of Columbia. Estimates for Puerto Rico and outlying territories are not available at this time. For more detailed information, please refer to the user guide 'Wells_2020_User.pdf'. The final dataset is available for download as a comma delimited text file and can be found in the 'outputs/' folder.
 
 For more information about domestic wells, visit the [EPA Website](https://www.epa.gov/privatewells)
 
@@ -13,18 +12,12 @@ This data can also be viewed in the public [2020 Domestic Well Application](http
 
 For additional questions about this research, contact:
 
-Dr. Andrew Murray
-
-Geographer
-
-United States Environmental Protection Agency 
-
-Office of Research and Development 
-
-Cincinnati, OH 
-
-[Murray.AndrewR@epa.gov](mailto:murray.andrewr@epa.gov)
-
+| Dr. Andrew Murray
+| Geographer
+| United States Environmental Protection Agency
+| Office of Research and Development
+| Cincinnati, OH
+| [Murray.AndrewR@epa.gov](mailto:murray.andrewr@epa.gov)
 
 ### Credits
 
