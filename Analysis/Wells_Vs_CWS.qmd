@@ -1,0 +1,333 @@
+---
+title: "Comparing Well Locations and Community Water Systems"
+format: html
+---
+
+## Overview
+
+The purpose of this analysis is to evaluate how often private domestic wells are located within community water system service areas. We have previously estimated that at the Census block level, water service is almost completely binary (either public or private). To test this, we will compare well drillers logs, which we have judged to have accurate location data and publicly available community water system service areas.
+
+## States Included
+
+We can only make this comparison in states where we have both well data and community water system service areas. These states include:
+
+- Arkansas
+- California
+- Kansas
+- Texas
+
+Within these four states, we have a total of 339,095 domestic wells, which were constructed between 1990 through 2020. Of those, we were able to determine that 46,267 (13.6%) had accurate geolocations. Accuracy was determined by reviewing data on location source. The source table for accuracy determinations is available in the file 'data/XY_Source_class.csv'. Examples of accurate locations are: 'GPS' & 'Heads-Up Digitization'. Arkansas does not provide explicit information on location source, but a review of the data suggests it to be generally accurate.
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+library(sf)
+library(tidyverse)
+library(vroom)
+library(leaflet)
+library(ggpubr)
+library(here)
+
+a.well.info <- vroom(here("Analysis/Accurate_Well_Info.csv"),col_types = c("Install_Date" = "c", "Dpth_Date" = "c"))
+```
+
+### State-Provided CWS Boundaries
+The following plot illustrates the percentage of community water system boundaries that were obtained from state or utility sources (> 91%). These are considered the most accurate.
+
+```{r}
+# Load CWS Boundaries
+cws <- st_read("D:/Github/ORD_SAB_Model/Output_Data/Archive/Final_052024/Final_052024.gdb", layer = "Final")
+
+counts <- cws%>%
+  st_drop_geometry()%>%
+  group_by(Primacy_Agency,Symbology_Field)%>%
+  summarise(nSystems = n())%>%
+  ungroup()%>%
+  pivot_wider(names_from = Symbology_Field, values_from = nSystems)%>%
+  mutate(MODELED = replace_na(MODELED,0),
+         STATE = replace_na(STATE,0),
+         Pct_State = 100*(STATE/(MODELED+STATE)))%>%
+  filter(Pct_State > 91)
+
+ggplot(counts)+
+  geom_col(aes(x = Pct_State, y = fct_reorder(Primacy_Agency,Pct_State)))+
+  coord_cartesian(xlim=c(90,100))+
+  labs(x = "Percent", y = "State")
+```
+
+
+## Comparing the Data at the Block Level
+
+To determine how often domestic wells are being constructed within service area boundaries, we have created two datasets. The first dataset is a spatial intersection between community water system service area boundaries and census blocks. The second is an intersection between accurate domestic wells installed between 1990 through 2020 and Census blocks. This allows us to compare 'apples to apples' the co-occurrence of community water system boundaries and domestic wells. For this exercise, we only consider a block to be within a community water system if it is 100% within the boundary. 
+
+```{r}
+# Load block join files for public water systems
+join.files <- data.frame(path = list.files("D:/Github/ORD_SAB_Model/Output_Data/Archive/Block_Join", full.names = TRUE),
+                         file = list.files("D:/Github/ORD_SAB_Model/Output_Data/Archive/Block_Join"))%>%
+  mutate(state = substr(file,1,2))%>%
+  filter(state %in% c("AR","CA","KS","TX"))
+
+cws.blks <- vroom(join.files$path)%>%
+  mutate(Pct_CWS = round(100*(I_Area_km/Block_Area_km)),
+         Has_CWS = ifelse(is.na(PWSID_12),FALSE,
+                          ifelse(Pct_CWS ==100,TRUE,FALSE)))
+
+# Load Blocks with domestic well intersections
+well.files <- list.files(here("Analysis/Accurate_Well_Blocks/"),full.names=TRUE)
+
+wells.blk <- vroom(well.files)
+
+# We're going to count the number of wells per census block
+wells.sum <- wells.blk%>%
+  group_by(GISJOIN)%>%
+  summarise(nWells = n())
+
+# Create a data frame of census blocks with CWS and Wells
+## Also join state designations
+fips <- distinct(select(tidycensus::fips_codes,state,state_code))
+
+compare <- full_join(cws.blks,wells.sum, by = "GISJOIN")%>%
+  mutate(nWells = replace_na(nWells,0),
+         Has_CWS = replace_na(Has_CWS,FALSE),
+         state_code = substr(GISJOIN,2,3))%>%
+  left_join(fips, by = "state_code")
+
+```
+
+
+### What percent of Wells are inside vs. Outside of Public Water Systems?
+
+```{r}
+wells.in.cws <- compare%>%
+  group_by(state,Has_CWS)%>%
+  summarise(nWells = sum(nWells,na.rm=TRUE))%>%
+  pivot_wider(names_from = Has_CWS, values_from = nWells)%>%
+  mutate(Pct_in_CWS = 100*(`TRUE` / (`TRUE`+`FALSE`)),
+         Pct_out = 100*(`FALSE` / (`TRUE`+`FALSE`)))
+
+ggplot(wells.in.cws)+
+  geom_point(aes(x = Pct_in_CWS, y = Pct_out, color = state), size = 5, alpha = 0.5)+
+  coord_cartesian(xlim = c(0,100), ylim = c(0,100))+
+  labs(x = "% Within CWS", y = "% Outside of CWS")
+```
+
+## A deeper look: Where does this occur?
+It's possible that there are still errors present, either in the CWS boundaries or the well locations, so we want to identify examples of where this is occurring. To do this, we will attach some population data and hone in on areas of interest.
+
+```{r}
+census.df <- vroom("D:/data/nhgis/tables/Blocks/nhgis0307_ds248_2020_block.csv")%>%
+  select(GISJOIN,U7B001,U7G001,AREALAND)%>%
+  setNames(c("GISJOIN","Population","Housing_Units","AREALAND"))
+
+conflicting <- compare%>%
+  filter(nWells>0 & Has_CWS == TRUE)%>%
+  group_by(GISJOIN)%>%
+  summarise(PWSID_12 = PWSID_12[1],
+            nWells = sum(nWells,na.rm=TRUE))%>%
+  left_join(census.df)
+
+# Load wells
+well.files <- list.files(here("Analysis/Accurate_Well_Blocks"),full.names=TRUE)
+wells <- vroom(well.files)%>%
+  st_as_sf(coords = c("X","Y"), crs = st_crs("ESRI: 102003"))%>%
+  st_transform(st_crs(4326))
+```
+
+
+### Blocks with More New Wells than Homes
+The first thing we can do is look at blocks where we have more drilled domestic wells (1990-2020) than housing units. 4,348 blocks have more wells drilled (1990-2020) than 2020 housing units. Of those, 3,584 (82%) have zero housing units.
+
+```{r}
+highest.wells <- conflicting%>%
+  arrange(-nWells)%>%
+  filter(nWells > Housing_Units)
+
+zero.hu <- highest.wells%>%
+  filter(Housing_Units==0)
+ggplot(highest.wells)+
+  geom_segment(x=0,y=0,xend=20,yend=20,linetype="dashed",color="red")+
+  geom_jitter(aes(x = Housing_Units,y = nWells), alpha = 0.2)+
+  coord_cartesian(xlim = c(0,20), ylim=c(0,20))+
+  labs(y = "# Wells Drilled 1990-2020")
+```
+
+Let's take a look at two examples of Census Blocks with well locations we think are accurate but have no housing units.
+
+#### Kansas
+
+This example in Kansas shows a recently developed neighborhood. The well installation dates are from 2020 (after the Census had been conducted). We see that there is also a community water system service area that covers this neighborhood. Upon a closer inspection, we find that this community water system is actually a rural water district. Rural water district boundaries can be imprecise and the polygon can refer to an administrative boundary instead of actual service connections. In this case, it appears that the community is directly adjacent to water service. It also appears that the road it is located on seperates the town of Attica, KS and Wichita, KS. The service area could be wrong, or something else could have lead to the development not being connected to public water when it was built.
+
+```{r}
+# Subset and save example blocks
+# ks.blks <- st_read("D:/data/nhgis/boundaries/Blocks/2020/KS_block_2020.shp")
+# 
+# ks.ex.1 <- ks.blks%>%
+#   filter(GISJOIN == "G20017300095093001")%>%
+#   st_transform(st_crs(4326))
+# 
+# st_write(ks.ex.1, here("Analysis/Example_Blocks.gpkg"), layer = "KS_1")
+
+ks.ex.1 <- st_read(here("Analysis/Example_Blocks.gpkg"), layer = "KS_1")
+
+ex.1.blk.wells <- wells%>%
+  filter(GISJOIN %in% ks.ex.1$GISJOIN)
+
+ex.1.cws <- cws%>%
+  filter(PWSID_12 == "KS2017338")%>%
+  st_transform(st_crs(4326))%>%
+  st_make_valid()
+
+ex.1.info <- a.well.info%>%
+  filter(Well_ID %in% ex.1.blk.wells$Well_ID)
+
+leaflet()%>%
+  addProviderTiles("Esri.WorldImagery")%>%
+  addPolygons(data=ex.1.cws, weight = 2, color = "black", fillOpacity = 0.3,fillColor = "orange")%>%
+  addPolygons(data = ks.ex.1, weight = 3, color = "red", fillOpacity = 0)%>%
+  addCircles(data = ex.1.blk.wells,weight = 1, color = "black", fillColor = "blue", opacity = 1, radius = 3)
+```
+
+
+#### Texas
+
+This block is another example of new housing on the edge of a service area. All wells were drilled in 2020 (after the Census). 
+
+```{r}
+# Subset and save example blocks
+# tx.blks <- st_read("D:/data/nhgis/boundaries/Blocks/2020/TX_block_2020.shp")
+# 
+# tx.ex.2 <- tx.blks%>%
+#   filter(GISJOIN == "G48002109501021051")%>%
+#   st_transform(st_crs(4326))
+# 
+# st_write(tx.ex.2, here("Analysis/Example_Blocks.gpkg"), layer = "TX_2")
+
+tx.ex.2 <- st_read(here("Analysis/Example_Blocks.gpkg"), layer = "TX_2")
+
+ex.2.blk.wells <- wells%>%
+  filter(GISJOIN %in% tx.ex.2$GISJOIN)
+
+ex.2.cws <- cws%>%
+  filter(PWSID_12 == "TX0110013")%>%
+  st_transform(st_crs(4326))%>%
+  st_make_valid()
+
+ex.2.info <- a.well.info%>%
+  filter(Well_ID %in% ex.2.blk.wells$Well_ID)
+
+leaflet()%>%
+  addProviderTiles("Esri.WorldImagery")%>%
+  addPolygons(data=ex.2.cws, weight = 2, color = "black", fillOpacity = 0.3,fillColor = "orange")%>%
+  addPolygons(data = tx.ex.2, weight = 3, color = "red", fillOpacity = 0)%>%
+  addCircles(data = ex.2.blk.wells,weight = 1, color = "black", fillColor = "blue", opacity = 1, radius = 3)%>%
+  setView(lng = -97.27389, lat = 30.36444, zoom = 14)
+```
+
+
+### Wells in High Population Areas
+
+For this exercise, we calculate population density for each census block and plot the number of wells against it. Again, we are only looking at wells drilled in census blocks that have a public water service area boundary. The plot below shows that only small numbers of wells are drilled in dense areas. Most wells are drilled in less-dense areas.
+
+```{r}
+pop.density <- conflicting%>%
+  mutate(Pop_Km = Population/(AREALAND/1000000))%>%
+  arrange(-Pop_Km)%>%
+  filter(AREALAND > 0)
+
+ggplot(pop.density)+
+  geom_point(aes(x = nWells, y = Pop_Km, color = Population))
+
+```
+
+Another way to look at this is using a density plot, we can create a matrix of each well, with its associated block population density.
+
+```{r}
+densty <- pop.density[rep(seq_len(nrow(pop.density)), pop.density$nWells), ]
+
+ggplot(densty)+
+  geom_density(aes(x = Pop_Km))+
+  coord_cartesian(xlim = c(0,500))
+```
+
+## Community Water Systems with Wells
+
+We want to investigate whether certain types of community water systems have wells in them. 
+
+```{r}
+cws.area <- cws%>%
+  st_transform(5070)%>%
+  mutate(Area_Km = as.numeric(st_area(.))/1000000)%>%
+  st_transform(4326)
+
+cws.conf <- cws.area%>%
+  filter(PWSID_12 %in% conflicting$PWSID_12)
+
+p.1 <- ggplot(cws.area)+
+  geom_histogram(aes(x = Population_Served_Count), binwidth = 10000)+
+  coord_cartesian(xlim = c(0,250000))
+
+p.2 <- ggplot(cws.conf)+
+  geom_histogram(aes(x = Population_Served_Count), binwidth = 10000)+
+  coord_cartesian(xlim = c(0,250000))
+
+ggarrange(p.1,p.2,nrow = 1)
+
+cws.class <- cws.area%>%
+  mutate(Wells = ifelse(PWSID_12 %in% cws.conf$PWSID_12,TRUE,FALSE))%>%
+  filter(Primacy_Agency %in% c("AR","CA","KS","TX"))
+
+ggplot(cws.class)+
+  geom_jitter(aes(x = Area_Km, y = Population_Served_Count, fill = Wells),color="black", alpha = 0.3, shape=21)+
+  scale_fill_manual(values = c("yellow","blue"))+
+  coord_cartesian(ylim = c(0,100000))+
+  labs(title = "Community Water System Size by Drilled Wells", x = "Service Area Km2", y = "Population Served")
+```
+
+The Community water systems that have drilled wells, are more likely to be inaccurate.
+
+### Colored by Population Served / Area
+
+```{r}
+scale <- cws.class%>%
+  mutate(scale = Population_Served_Count/Area_Km)%>%
+  filter(Population_Served_Count<100000)
+
+ggplot(scale)+
+  geom_jitter(aes(x = Area_Km, y = Population_Served_Count, fill = scale),color="black", alpha = 0.3, shape=21)+
+  scale_fill_viridis_b()+
+  coord_cartesian(ylim = c(0,100000))+
+  labs(title = "Community Water System Size by Drilled Wells", x = "Service Area Km2", y = "Population Served")
+```
+
+### How often do drilled wells intersect the output
+
+```{r}
+model <- vroom(here("Method_2/data/Reclass_all_info.csv"))
+
+w.counts <- wells%>%
+  st_drop_geometry()%>%
+  filter(State %in% c("AR","CA","KS","TX"))%>%
+  group_by(GISJOIN)%>%
+  summarise(nWells = n())
+
+m.join <- cws.blks%>%
+  left_join(w.counts)%>%
+  mutate(nWells = replace_na(nWells,0))%>%
+  left_join(census.df)
+
+m.compare <- m.join%>%
+  group_by(Has_CWS)%>%
+  summarise(wells = sum(nWells),
+            Population = sum(Population))
+
+no.cws <- census.df%>%
+  mutate(state_code = substr(GISJOIN,2,3))%>%
+  left_join(fips)%>%
+  filter(state %in% c("AR","CA","KS","TX"))%>%
+  filter(GISJOIN %in% wells$GISJOIN)%>%
+  filter(!GISJOIN %in% conflicting$GISJOIN)
+```
+### Drilled Wells in Private vs. Public Blocks
+We evaluate how many drilled wells are in blocks classified as public versus private.
+
+

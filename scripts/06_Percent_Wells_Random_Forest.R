@@ -19,7 +19,7 @@ rw.estimates <- vroom(rw.files)%>%
   select(GISJOIN,GISJOIN_BG,state,Est_Wells_2020)
 
 # Predicted classes
-predClass <- vroom("Water_Use/outputs/data/US_Blks_Reclass_NEW.csv")%>%
+predClass <- vroom("outputs/data/US_Blks_Reclass_NEW.csv")%>%
   left_join(cntrds)
 
 # Identify block groups with public and private classes

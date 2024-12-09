@@ -2,3 +2,16 @@
 .Rhistory
 .RData
 .Ruserdata
+
+
+/Method_2/data/
+/data/Well*Logs/
+/outputs/Census_Blocks.gpkg
+/outputs/Well_Estimates_2020_Blocks_Join.csv
+/outputs/Well_Estimates_2020_Blocks_10282024_Join.csv
+/outputs/Well_Estimates_2020_Blks_OLD.csv
+/outputs/Well_Estimates_2020_Blocks_10282024.csv
+/outputs/Well_Estimates_2020_Blocks_10252024.csv
+/outputs/Census_Blocks.gdb
+/publication
+/Analysis/BG_Wells_Est_2020.shp

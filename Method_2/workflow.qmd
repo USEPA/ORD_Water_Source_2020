@@ -1,0 +1,609 @@
+---
+title: "Revised Method"
+format: html
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(sf)
+library(vroom)
+library(here)
+
+weight.90 <- vroom("D:/Github/ORD_Water_Supply/Water_Use/outputs/data/blocks_90_weight.csv")
+
+# Load Water Source Result
+ws.df <- vroom(here("outputs/Well_Estimates_2020_Blks.csv"), show_col_types = FALSE)
+
+# Load CWS Boundary Data and filter to state/utility boundaries
+cws <- st_read(here("Method_2/data/EPA_CWS_V1.shp"))%>%
+ filter(Method == "State")
+
+# Load system information
+info.df <- vroom("D:/Github/ORD_SAB_Model/Input_Data/SDWIS/Water_System_Detail_2023Q4.csv")
+
+# Load block join files for public water systems
+join.files <- list.files("D:/Github/ORD_SAB_Model/Output_Data/Archive/Block_Join", full.names = TRUE)
+
+join.df <- vroom(join.files)%>%
+  filter(PWSID_12 %in% cws$PWSID)%>%
+  group_by(GEOID20)%>%
+  summarise(I_Area_km = sum(I_Area_km),
+            Block_Area_km = Block_Area_km[1])
+
+# Load population
+pop <- vroom("D:/data/nhgis/tables/Blocks/nhgis0307_ds248_2020_block.csv")%>%
+  select(GISJOIN,GEOID,U7B001,U7G001)%>%
+  mutate(GEOID20 = substr(GEOID,10,24))%>%
+  select(!GEOID)
+
+
+## Load wells files
+files <- list.files("D:/Github/ORD_Water_Supply/Water_Use/Outputs/data/Drilled_Wells_Allocated", pattern=".csv$", full.names=TRUE)
+
+wells.df <- vroom(files)%>%
+  select(GISJOIN,HU_2020,Est_Wells_2020)
+
+# Check for Census Blocks that have accurate wells and a public service area.
+
+```
+
+## Overview
+
+### Step 1
+For States where we have > 90% of the population served by CWS within authoritative service area boundaries:
+- If in service are, then public. If not, then private. 
+
+### Step 2
+For all states:
+- Blocks that have zero housing units in 2020, but are within a Census designated urban area, should be classified as Public
+
+### Step 3
+**We can't do this, since the water districts in many states will overwrite way too many wells.**
+
+For all other states with < 90% service areas:
+
+- Reclassify well layer to binary: anything with <= 90% wells will be considered public water
+
+- Census blocks that were classified as using private water are overridden if they are within a known service area boundary.
+
+### Step 4
+If we have well drill records for a census block, they should be added to the Census block
+
+
+
+### Determine the percent of population served covered by authoritative boundaries from each state
+
+```{r}
+pct.pop <- info.df%>%
+  select(`PWS ID`, `Primacy Agency`, `Population Served Count`)%>%
+  mutate(Authoritative = ifelse(`PWS ID` %in% cws$PWSID,"YES","NO"))%>%
+  group_by(`Primacy Agency`)%>%
+  mutate(Pop_Served_Total = sum(`Population Served Count`, na.rm = TRUE))%>%
+  ungroup()%>%
+  mutate(Auth_Pop = ifelse(Authoritative == "NO",0,`Population Served Count`))%>%
+  group_by(`Primacy Agency`)%>%
+  summarise(Auth_Pop = sum(Auth_Pop),Pop_Served_Total = Pop_Served_Total[1])%>%
+  mutate(Pct_Auth = round(100*(Auth_Pop/Pop_Served_Total)))%>%
+  filter(Pct_Auth > 95)
+
+ggplot(pct.pop)+
+  geom_col(aes(x = Pct_Auth, y = fct_reorder(`Primacy Agency`,Pct_Auth)))+
+  coord_cartesian(xlim = c(75,100))+
+  labs(title = "Population Served by Community Water Systems\nWith Authoritative Service Areas",
+       x = "% of State Population Using CWS")
+```
+
+## Step 1:
+
+Load block centroids and intersect with Census defined urban areas. Then run an if/else statement for blocks with zero housing units that intersect urban areas.
+
+```{r urbanAreas, eval = FALSE}
+
+zero.units <- vroom("D:/data/nhgis/tables/Blocks/nhgis0307_ds248_2020_block.csv")%>%
+  select(GISJOIN,U7G001)%>%
+  filter(U7G001 == 0)
+
+cntrds <- vroom("D:/Github/ORD_Water_Supply/data/blocks_2020_all_centroids.csv")%>%
+  filter(GISJOIN %in% zero.units$GISJOIN)%>%
+  st_as_sf(coords = c("X","Y"), crs = st_crs(4326))
+
+# Import Urban Areas
+ua <- st_read(here("Method_2/data/Urban_Areas.shp"))%>%
+  st_transform(st_crs(4326))
+
+# Dissolve Urban Areas
+agg <- ua%>%
+  summarise()%>%
+  st_make_valid()
+
+# Find block centroids that intersect urban areas
+tictoc::tic()
+cntrd.intrsct <- cntrds%>%
+  filter(st_intersects(.,agg,sparse = FALSE))
+tictoc::toc()
+
+# Save data frame of intersecting blocks with zero housing units
+df.zero.urban <- cntrd.intrsct%>%
+  mutate(URBAN = TRUE)%>%
+  st_drop_geometry()
+```
+
+## Step 2
+### Apply Reclassification from Service Areas
+
+```{r reclass1, eval= FALSE}
+reclass.1 <- ws.df%>%
+  filter(State %in% pct.pop$`Primacy Agency`)%>%
+  left_join(join.df, by = c("GEOID_Blk"="GEOID20"))%>%
+  mutate(I_Area_km = replace_na(I_Area_km,0),
+         OldClass = ifelse(Est_Wells_2020/HU_2020>=0.5,"Private","Public"),
+         NewClass = ifelse(I_Area_km > 0,"Public","Private"),
+         Old_New = paste0(OldClass," -> ",NewClass))
+
+# Save spatial File
+states <- c("AZ","AR","CA","KS","KY","NH","NJ","PA","RI","TN","TX","UT","WA")
+
+sf <- data.frame()
+
+for(s in states){
+  sf.next <- st_read(paste0("D:/data/nhgis/boundaries/Blocks/2020/",s,"_block_2020.shp"))%>%
+  select(GEOID20)%>%
+  st_transform(st_crs(5070))%>%
+    mutate(Area_Km = as.numeric(st_area(.))/1000000)%>%
+  left_join(reclass.1, by = c("GEOID20"="GEOID_Blk"))%>%
+    mutate(NewClass = ifelse(I_Area_km/Area_Km > 0.1,"Public","Private"),
+         Old_New = paste0(OldClass," -> ",NewClass))
+
+  sf <- rbind(sf,sf.next)
+
+  print(paste0("Completed ",s," @ ", Sys.time()))
+}
+
+
+st_write(sf,here("Method_2/data/Method_2.gpkg"), layer = "Step_2", append = FALSE)
+
+# sf <- st_read(here("Method_2/data/Method_2.gpkg"), layer = "Step_1")
+reclass.2 <- sf%>%
+  st_drop_geometry()%>%
+  mutate(Reclass_Step = 2)
+  left_join(pop, by = "GEOID20")
+
+# Save data table
+vroom_write(reclass.2, here("Method_2/data/Reclass_2.csv"), delim = ",", append = FALSE)
+
+```
+
+
+
+## Step 3 (Part 2 of step 2 in paper):
+
+For every block that was not captured in steps 1 & 2, check if the block falls within an authoritative boundary. 
+
+- Census blocks that were classified as using private water are overridden if they are within a known service area boundary.
+
+```{r reclass3, eval=FALSE}
+reclass.2 <- vroom(here("Method_2/data/Reclass_2.csv"))
+
+pws.ids <- unique(cws$PWSID)
+
+auth.blks <- join.df%>%
+  filter(I_Area_km/Block_Area_km > 0.1)
+
+reclass.3 <- ws.df%>%
+  filter(!GEOID_Blk %in% reclass.2$GEOID20 & GEOID_Blk %in% auth.blks$GEOID20)%>%
+  mutate(OldClass = Pred_Class,
+         NewClass = ifelse(GEOID_Blk %in% auth.blks$GEOID20, "Public",OldClass),
+         Old_New = paste0(OldClass," -> ",NewClass),
+         Reclass_Step = 3)
+```
+
+## Step 4:
+
+In step 4, we combine the reclassification files, then calculate binary estimated wells: zero for 'public' and wells = housing units for 'private'. Then, for publicly classified blocks, we add well logs to 1990 wells to gain an estimate of current wells. If current wells exceeds 50% of current housing units, the block is flipped to private.
+```{r}
+df.urban.zero <- vroom(here("Method_2/data/Urban_NoHousing.csv"))%>%
+  left_join(pop, by = "GISJOIN")
+
+reclass.urban <- ws.df%>%
+  filter(!GEOID_Blk %in% reclass.2$GEOID20 & !GEOID_Blk %in% reclass.3$GEOID_Blk)%>%
+  filter(GEOID_Blk %in% df.urban.zero$GEOID20)%>%
+  mutate(OldClass = ifelse(Est_Wells_2020/HU_2020>0.9,"Private","Public"),
+         NewClass = ifelse(GEOID_Blk %in% df.urban.zero$GEOID20,"Public",
+                           ifelse(Est_Wells_2020/HU_2020>0.9,"Private",OldClass)),
+         Old_New = paste0(OldClass," -> ",NewClass),
+         Reclass = "Urban Area")
+
+vroom_write(reclass.urban, here("Method_2/data/Reclass_1.csv"), delim = ",", append = FALSE)
+
+# Load well join files
+well.join.files <- list.files(here("data/Well Logs/Census_Blocks/"), full.names = TRUE)
+wells.join <- vroom(well.join.files)%>%
+  select(GISJOIN,Well_ID,Install_Date)%>%
+  group_by(Well_ID)%>%
+  mutate(Install_Date = max(Install_Date))%>%
+  ungroup()%>%
+  distinct()%>%
+  group_by(GISJOIN)%>%
+  summarise(nWells = n())
+
+## Load 1990 well estimates and add them to drilled wells
+wells.90 <- vroom("D:/Github/ORD_Water_Supply/Water_Use/outputs/data/Blocks_2020.csv")%>%
+  mutate(HU_1990 = replace_na(HU_1990,0),
+         Pct_Wells_Other_S = replace_na(Pct_Wells_Other_S,0),
+         Wells_90 = round(HU_1990 * Pct_Wells_Other_S))%>%
+  select(GISJOIN,Wells_90)
+  
+wells.add <- wells.join%>%
+  left_join(wells.90)%>%
+  mutate(Total_Wells = nWells + Wells_90)
+
+
+# Combine Everything and recalculate Wells
+no.reclass <- ws.df%>%
+  filter(!GEOID_Blk %in% reclass.urban$GEOID_Blk & !GEOID_Blk %in% reclass.2$GEOID20 & !GEOID_Blk %in% reclass.3$GEOID_Blk)%>%
+  mutate(OldClass = Pred_Class,
+         NewClass = ifelse(wasIsland == TRUE & Pred_Class == "Private","Public",
+                            ifelse(wasIsland == TRUE & Pred_Class == "Public","Private",Pred_Class)),
+         Old_New = paste0(OldClass," -> ",NewClass),
+         Reclass = ifelse(OldClass == NewClass,"None","Was Island"))
+
+
+## Assign Reclassification Methods
+colnames(reclass.2)[1] <- "GEOID_Blk"
+r0 <- no.reclass%>%
+  select(GEOID_Blk,GEOID_BlkGrp,HU_2020,Prob_Pub,Tree_Cat,OldClass,NewClass,Reclass)%>%
+  mutate(OldClass = as.character(OldClass),
+         NewClass = as.character(NewClass),
+         OldClass = replace_na(OldClass,"NONE"),
+         NewClass = replace_na(NewClass,"NONE"))
+
+r1 <- reclass.urban%>%
+  filter(!GEOID_Blk %in% reclass.2$GEOID_Blk)%>%
+  select(GEOID_Blk,GEOID_BlkGrp,HU_2020,Prob_Pub,Tree_Cat,OldClass,NewClass,Reclass)%>%
+  mutate(OldClass = "NONE",
+         NewClass = as.character(NewClass),
+         NewClass = replace_na(NewClass,"NONE"))
+
+r2 <- reclass.2%>%
+  mutate(OldClass = as.character(OldClass),
+         NewClass = as.character(NewClass),
+         OldClass = replace_na(OldClass,"NONE"),
+         NewClass = replace_na(NewClass,"NONE"),
+         Reclass = ifelse(OldClass == NewClass,"None","Complete CWS Boundaries"))%>%
+  select(GEOID_Blk,GEOID_BlkGrp,HU_2020,Prob_Pub,Tree_Cat,OldClass,NewClass,Reclass)
+
+r3 <- reclass.3%>%
+  mutate(OldClass = as.character(OldClass),
+         NewClass = as.character(NewClass),
+         OldClass = replace_na(OldClass,"NONE"),
+         NewClass = replace_na(NewClass,"NONE"),
+         Reclass = ifelse(NewClass == "Public" & !OldClass == NewClass,"Within CWS","None"))%>%
+  select(GEOID_Blk,GEOID_BlkGrp,HU_2020,Prob_Pub,Tree_Cat,OldClass,NewClass,Reclass)
+
+r.combine <- r0%>%
+  rbind(r1,r2,r3)
+
+check <- as.data.frame(table(r.combine$GEOID_Blk))%>%
+  filter(Freq > 1)
+
+r4 <- r.combine%>%
+  left_join(pop, by = c("GEOID_Blk"="GEOID20"))%>%
+  left_join(wells.add)%>%
+  mutate(nWells = replace_na(nWells,0),
+         Wells_90 = replace_na(Wells_90,0),
+         Total_Wells = replace_na(Total_Wells,0),
+         HU_2020 = replace_na(HU_2020,0),
+         # OldClass = replace_na(OldClass,"NONE"),
+         # NewClass = replace_na(NewClass,"NONE"),
+         NewClass = ifelse((Total_Wells/HU_2020)>=0.5 & HU_2020>0,"Private",NewClass),
+         Reclass = ifelse(NewClass == "Private" & OldClass == "Public" & (Total_Wells/HU_2020)>=0.5 & HU_2020>0,"Drill Logs",Reclass))
+```
+
+
+
+## Create Final Dataset for Export
+```{r}
+fips <- tidycensus::fips_codes%>%
+  mutate(Join = paste0(state_code,county_code))
+
+df.final <- r4%>%
+  mutate(Join = substr(GEOID_Blk,1,5))%>%
+  left_join(fips, by = "Join")%>%
+  mutate(Est_Wells = ifelse(NewClass == "Private",HU_2020,0),
+         Est_Wells = ifelse(Total_Wells > 0,Total_Wells,Est_Wells),
+         Est_Wells = ifelse(Est_Wells>HU_2020,HU_2020,Est_Wells),
+         Est_Wells = replace_na(Est_Wells,0))%>%
+  select(state,state_code,county_code,GEOID_Blk,GEOID_BlkGrp,U7B001,U7G001,Prob_Pub,Tree_Cat,OldClass,NewClass,Reclass,Wells_90,Est_Wells)%>%
+  setNames(c("State","State_Fips","County_Fips","GEOID_Block","GEOID_BlockGroup","Population","Housing_Units","Probability_Public","Tree_Node","Old_Class","Final_Class","Reclass_Type","Wells_1990","Est_Wells_2020"))%>%
+  mutate(Reclass_Type = ifelse(Final_Class == Old_Class,"None",Reclass_Type),
+         Pct_Public = ifelse(Housing_Units > 0, round(100*((Housing_Units-Est_Wells_2020)/Housing_Units)),NA),
+         Pct_Wells = ifelse(Housing_Units > 0, round(100*(Est_Wells_2020/Housing_Units)),NA),
+         Pop_Wells = ifelse(Population > 0, round((Population/Housing_Units)*Est_Wells_2020),0),
+         Pop_CWS = ifelse(Population > 0 & Est_Wells_2020 == 0,Population,
+                          ifelse(Population > 0 & Est_Wells_2020 > 0,round(Population - Pop_Wells),0)))
+
+vroom_write(df.final,here("outputs/Well_Estimates_2020_Blocks_10302024.csv"),delim = ",", append=FALSE)
+
+# Create Shapefiles
+shps <- list.files("D:/data/nhgis/boundaries/Blocks/2020", pattern = ".shp$", full.names = TRUE)
+
+for(n in 1:length(shps)){
+  st.sf <- st_read(shps[n])%>%
+    select(GEOID20)%>%
+    setNames(c("GEOID_Block","geometry"))%>%
+    st_transform(4326)%>%
+    st_make_valid()%>%
+    left_join(df.final)
+  
+  st_write(st.sf,here("outputs/Census_Blocks.gpkg"),layer = st.sf$State[1], append = FALSE)
+}
+
+```
+
+
+
+## Statistics
+
+```{r stats}
+# Reclass Counts
+reclass.counts <- df.final%>%
+  drop_na(Final_Class)%>%
+  mutate(nRows = n())%>%
+  group_by(Reclass_Type)%>%
+  summarise(N = n(),
+            nRows = nRows[1])%>%
+  mutate(Percent = round(100*(N/nRows),1))
+
+write.csv(reclass.counts,here("Analysis/Reclass_Counts.csv"))
+```
+
+
+
+
+
+
+## Check Wells vs Public Water
+Here, we compare authoritative service area boundaries and well logs which we consider accurate. We can only compare in states where we have both. Those States are:
+
+- Arizona
+- Arkansas
+- California
+- Kansas
+- Pennsylvania
+- Tennessee
+
+"AZ","AR","CA","CT","KS","KY","NH","NJ","NM","NY","NC","PA","RI","TN","TX","UT","WA"
+
+```{r}
+# Load block join files for public water systems
+join.files <- data.frame(path = list.files("D:/Github/ORD_SAB_Model/Output_Data/Archive/Block_Join", full.names = TRUE),
+                         file = list.files("D:/Github/ORD_SAB_Model/Output_Data/Archive/Block_Join"))%>%
+  mutate(state = substr(file,1,2))%>%
+  filter(state %in% c("AZ","CA","KS","PA","TN"))
+
+cws.blks <- vroom(join.files$path)%>%
+  full_join(wells.df,by = "GISJOIN")%>%
+  mutate(Pct_CWS = 100*(I_Area_km/Block_Area_km),
+         Has_CWS = ifelse(is.na(PWSID_12),FALSE,
+                          ifelse(Pct_CWS >=10,TRUE,FALSE)))
+
+conflicting <- cws.blks%>%
+  filter(Has_CWS == TRUE & Est_Wells_2020 > 0)%>%
+  mutate(Pct_Wells = 100*(Est_Wells_2020/HU_2020))
+
+# Save a spatial file for investigation.
+cntrds <- vroom("D:/Github/ORD_Water_Supply/data/blocks_2020_all_centroids.csv")
+
+conf.sf <- cntrds%>%
+  left_join(conflicting)%>%
+  filter(GISJOIN %in% conflicting$GISJOIN)%>%
+  st_as_sf(coords = c("X","Y"), crs = st_crs(4326))
+
+st_write(conf.sf,"D:/temp/conflicting.gpkg",layer = "points", append = FALSE)
+```
+
+
+```{r reclass1Result}
+reclass.1 <- vroom(here("Method_2/data/Reclass_1.csv"))
+
+stats <- reclass.1%>%
+  group_by(State, Old_New)%>%
+  summarise(n = n(),
+            Area = sum(Area_Km,na.rm=TRUE),
+            Pop = sum(U7B001, na.rm = TRUE))%>%
+  drop_na()%>%
+  ungroup()
+
+ggplot(stats)+
+  geom_col(aes(x = n, y = Old_New))+
+  facet_wrap(~State, scales = "free", ncol = 3)
+
+ggplot(stats)+
+  geom_col(aes(x = Pop, y = Old_New, fill = Old_New))+
+  facet_wrap(~State, scales = "free", axis.labels = "all_x", ncol = 3)+
+  scale_x_continuous(labels = scales::label_number(scale = .000001, suffix = "M"))+
+  labs(y = "", x = "Population (Millions)", fill = "Class Change")
+```
+
+
+
+
+```{r urbanReclass, eval = FALSE}
+
+
+# Save as centroids
+# r2.sf <- cntrds%>%
+#   left_join(pop, by = "GISJOIN")%>%
+#   left_join(reclass.2.stats, by = c("GEOID20"="GEOID_Blk"))%>%
+#   drop_na(NewClass)
+# 
+# st_write(r2.sf,here("Method_2/Data/reclass_urban.gpkg"))
+
+table(reclass.2.stats$Pred_Class)
+```
+
+
+```{r tbl2, echo = FALSE}
+reclass.2 <- vroom(here("Method_2/data/Reclass_2.csv"))
+
+reclass.2.stats <- reclass.2%>%
+  filter(NewClass == "Public" & is.na(HU_2020))
+
+table(reclass.2.stats$Pred_Class)
+```
+
+
+Using this step, we reclassify 23,283 blocks from private to public.
+
+
+
+
+
+# Combine New Dataset
+
+```{r combine, eval = FALSE}
+reclass.1.sel <- reclass.1%>%
+  select(GEOID20,OldClass,NewClass,Old_New)%>%
+  mutate(cat = "Complete State")%>%
+  distinct()%>%
+  filter(!is.na(NewClass))
+
+reclass.2.sel <- reclass.2%>%
+  select(GEOID_Blk,OldClass,NewClass,Old_New)%>%
+  mutate(cat = "Urban Areas")%>%
+  filter(!GEOID_Blk %in% reclass.1.sel$GEOID20)%>%
+  distinct()%>%
+  filter(!is.na(NewClass))
+colnames(reclass.2.sel)[1] <- "GEOID20"
+
+# reclass.3.sel <- reclass.3%>%
+#   select(GEOID_Blk,OldClass,NewClass,Old_New)%>%
+#   mutate(cat = "Partial / No State")%>%
+#   filter(!GEOID_Blk %in% reclass.1.sel$GEOID20)%>%
+#   filter(!GEOID_Blk %in% reclass.2.sel$GEOID20)%>%
+#   distinct()
+# colnames(reclass.3.sel)[1] <- "GEOID20"
+# 
+# reclass.all <- reclass.1.sel%>%
+#   rbind(reclass.2.sel,reclass.3.sel)
+
+reclass.combo <- rbind(reclass.1.sel,reclass.2.sel)
+reclass.all <- ws.df%>%
+  left_join(reclass.combo, by = c("GEOID_Blk"="GEOID20"))%>%
+  mutate(Reclass_Type = ifelse(cat == "Complete State" & !OldClass == NewClass,"Complete State",
+                          ifelse(cat == "Urban Area" & !OldClass == NewClass,"Urban Area - No Pop",
+                                 ifelse(wasIsland == TRUE,"Was Island",
+                                        ifelse(NA_Reclass == TRUE,"Was NA","None")))),
+         Reclass_Type = replace_na(Reclass_Type,"None"),
+         Final_Class = ifelse(!is.na(NewClass),NewClass,Pred_Class))%>%
+  select(GEOID_Blk,GEOID_BlkGrp,State,HU_2020,Prob_Pub,Tree_Cat,Final_Class,Reclass_Type)
+
+# Save File
+vroom_write(reclass.all,here("outputs/Final_Classification.csv"), delim = ",")
+
+
+# Save spatial file of centroids to inspect
+reclass.sf <- vroom("D:/Github/ORD_Water_Supply/data/blocks_2020_all_centroids.csv")%>%
+  left_join(pop, by = "GISJOIN")%>%
+  left_join(ws.df, by = c("GEOID20"="GEOID_Blk"))%>%
+  left_join(reclass.all, by = "GEOID20")%>%
+  st_as_sf(coords = c("X","Y"), crs = st_crs(4326))
+
+st_write(reclass.sf, here("Method_2/data/Method_2.gpkg"), layer = "Centroids_Reclass", append = FALSE)
+
+reclass.all.info <- reclass.sf%>%
+  st_drop_geometry()
+vroom_write(reclass.all.info, here("Method_2/data/Reclass_all_info.csv"), delim = ",", append = FALSE)
+```
+
+## Reclassification Results
+
+```{r reclassPlot}
+reclass.all.info <- vroom(here("Method_2/data/Reclass_all_info.csv"))
+
+reclass.stats <- reclass.all.info%>%
+  group_by(Old_New)%>%
+  summarise(n = n())
+
+ggplot(reclass.stats)+
+  geom_col(aes(x = Old_New, y = n/1000000, fill = Old_New), color = "black")+
+  labs(title = "Reclassification", x = "Reclassification Result", y = "# Blocks (Millions)")+
+  theme(legend.position = "none")
+```
+
+## Compare Well / Public Water Estimates
+This is broken down into two categories:
+
+- Original Estimate
+- Binary Estimate With Reclassification
+
+```{r}
+counts <- reclass.all.info%>%
+  mutate(B_Wells = ifelse(NewClass == "Private",HU_2020,0),
+         B_Public = ifelse(NewClass == "Public",HU_2020,0))%>%
+  summarise(O_Wells = sum(Est_Wells_2020,na.rm = TRUE),
+            O_Public = sum(HU_2020-Est_Wells_2020,na.rm=TRUE),
+            B_Wells = sum(B_Wells, na.rm=TRUE),
+            B_Public = sum(B_Public,na.rm = TRUE))%>%
+  pivot_longer(everything(),names_to = "var", values_to = "val")
+
+counts$group = c("Wells","Public","Wells","Public")
+counts$label <- c("Original","Original","Reclass","Reclass")
+ggplot(counts)+
+  geom_col(aes(x = label, y = val/1000000, group = group))+
+  facet_wrap(~group, scales = "free")+
+  labs(title="Comparison of Estimated Totals", x = "", y = "Housing Units (Millions)")
+```
+
+Prior to this reclassification, we estimated that `r round(100*(115009937/(115009937+25487797)),1)`% of housing units were using public water. After reclassification, we estimate that `r round(100*(120221224/(120221224+20276510)),1)`
+
+
+```{r}
+final <- reclass.all.info%>%
+  mutate(NewClass = ifelse(Pred_Class == "Private" & wasIsland == TRUE & NewClass == "Private","Public",NewClass))
+
+private <- final%>%
+  filter(NewClass == "Private")
+
+public <- final%>%
+  filter(NewClass == "Public")
+
+check <- final%>%
+  filter(wasIsland == TRUE & Pred_Class == "Private" & Old_New == "Private -> Private")
+
+
+wi <- final%>%
+  filter(substr(GISJOIN,2,3)=="55")
+
+wi.private <- wi%>%
+  filter(NewClass == "Private")
+
+wi.public <- wi%>%
+  filter(NewClass == "Public")
+
+print(paste0("Housing Units Self-Supplying Water: ",sum(private$U7G001,na.rm=TRUE)))
+print(paste0("Housing Units on Public Supply: ", sum(public$U7G001,na.rm=TRUE)))
+```
+
+## 1990 data check
+```{r}
+hu.100 <- vroom("D:/data/nhgis/tables/Block_Groups/nhgis0293_ds120_1990_blck_grp.csv")%>%
+  select(GISJOIN,ET1001,ESA001)%>%
+  setNames(c("GISJOIN","Population","Housing_Units"))
+
+sow <- vroom("D:/data/nhgis/tables/Block_Groups/nhgis0292_ds123_1990_blck_grp.csv")%>%
+  select(GISJOIN,EX5001,EX5002,EX5003,EX5004)%>%
+  mutate(pctselfSupply = (EX5002+EX5003+EX5004)/(EX5001+EX5002+EX5003+EX5004))
+
+use90 <- hu.100%>%
+  left_join(sow)%>%
+  mutate(Pop_Self = Population*pctselfSupply)
+
+use90.wi <- use90%>%
+  filter(substr(GISJOIN,2,3)=="55")
+
+# Import data for 1990 Census Block Groups
+bg.90 <- vroom(here("data/Census_Tables/US_Blk_Grps_1990.csv"))%>%
+  left_join(hu.100,by = c("GISJOIN_BG"="GISJOIN"))
+```
+
