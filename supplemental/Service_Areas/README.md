@@ -21,6 +21,7 @@ We determined these data to be the most complete and accurate of the service are
 This table references the percent of the population within each Primacy Agency that is served by public water systems with authoritative boundaries.
 
 |Primacy Agency|Boundary Population|SDWIS Population|Percent Served|
+|--------------|-------------------|----------------|--------------|
 |Alabama|   498,393| 6,065,806|8|
 |Arizona| 6,771,026| 6,880,983|98|
 |Arkansas| 2,914,078| 2,917,386|100|
