@@ -6,12 +6,12 @@ library(rpart.plot)
 library(vip)
 
 # import crosswalked data
-cw <- vroom("Water_Use/outputs/data/Blocks_2020.csv")
+cw <- vroom("D:/Github/ORD_Water_Supply/Water_Use/outputs/data/Blocks_2020.csv")
 
 
 
 # Import distance & Imperviousness for all states
-df <- vroom("sensitive/Blocks_2020_DT_BUILD.csv")%>%
+df <- vroom("D:/Github/ORD_Water_Supply/sensitive/Blocks_2020_DT_BUILD.csv")%>%
   mutate(Water_Type = as.factor(Water_Type))%>%
   select(GISJOIN,Water_Type,impervious,Intake_miles)%>%
   left_join(cw)%>%

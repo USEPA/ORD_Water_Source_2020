@@ -12,7 +12,7 @@ library(here)
 weight.90 <- vroom("D:/Github/ORD_Water_Supply/Water_Use/outputs/data/blocks_90_weight.csv")
 
 # Load Water Source Result
-ws.df <- vroom(here("outputs/Well_Estimates_2020_Blks.csv"), show_col_types = FALSE)
+ws.df <- vroom(here("outputs/Well_Estimates_2020_Blocks.csv"), show_col_types = FALSE)
 
 # Load CWS Boundary Data and filter to state/utility boundaries
 cws <- st_read(here("Method_2/data/EPA_CWS_V1.shp"))%>%
