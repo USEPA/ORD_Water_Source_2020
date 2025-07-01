@@ -1,9 +1,14 @@
+# IMPORTANT NOTE:
+
+The metadata here refers to the file 'Well_Estimates_2020_Blks_OLD.csv'. The other file: 'Well_Estimates_2020_Blocks.csv' is an updated file undergoing testing, which incorporates the EPA Community Water System Service Areas.
+
+
 ## Dataset of Census Blocks
 
 The 'Well_Estimates_2020.csv' dataset represents the final estimates of well use by housing units at the census block geography. The number of housing units using public water systems may be inferred by subtracting `Est_Wells_2020` from `HU_2020`. Column descriptions can be found in the table below.
 
 | Column | Description |
-|----|----|
+|------------------------------------|------------------------------------|
 | GEOID_Blk | U.S. Census block identifier |
 | GEOID_BlkGrp | U.S. Census block group identifier |
 | State | State name |
